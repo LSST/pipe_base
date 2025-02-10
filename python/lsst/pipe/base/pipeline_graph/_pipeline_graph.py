@@ -1593,6 +1593,8 @@ class PipelineGraph:
         element in the iterable.
 
         If `has_been_sorted`, all subgraphs will be sorted as well.
+
+        Task subsets will not be included in the returned graphs.
         """
         # Having an overall input in common isn't enough to make subgraphs
         # dependent on each other, so we want to look for connected component
@@ -1613,7 +1615,7 @@ class PipelineGraph:
                 yield self
                 return
             else:
-                component_subgraph = PipelineGraph(universe=self._universe)
+                component_subgraph = PipelineGraph(universe=self._universe, data_id=self._raw_data_id)
                 component_subgraph.add_task_nodes(
                     [self._xgraph.nodes[key]["instance"] for key in component_task_keys], parent=self
                 )
