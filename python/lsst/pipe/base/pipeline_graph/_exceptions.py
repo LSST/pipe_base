@@ -31,6 +31,7 @@ __all__ = (
     "DuplicateOutputError",
     "EdgesChangedError",
     "IncompatibleDatasetTypeError",
+    "InvalidExpressionError",
     "InvalidStepsError",
     "PipelineDataCycleError",
     "PipelineGraphError",
@@ -104,3 +105,9 @@ class PipelineGraphExceptionSafetyError(PipelineGraphError):
 
 class InvalidStepsError(PipelineGraphError):
     """Exception raised when the step definitions are invalid."""
+
+
+class InvalidExpressionError(PipelineGraphError):
+    """Exception raised when a pipeline subset expression could not be parsed
+    or applied.
+    """

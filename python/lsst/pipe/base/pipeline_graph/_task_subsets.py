@@ -292,7 +292,7 @@ class StepDefinitions:
 
         Parameters
         ----------
-        label : `strr
+        label : `str`
             Label for the step.
 
         Returns
@@ -315,7 +315,7 @@ class StepDefinitions:
 
         Parameters
         ----------
-        label : `strr
+        label : `str`
             Label for the step.
         dimensions : `lsst.daf.butler.DimensionGroup`
             Dimensions that can be used to split up this step's quanta.
