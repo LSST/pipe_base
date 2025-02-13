@@ -372,23 +372,42 @@ class Pipeline:
         string based matching due to the nature of contracts and may prune more
         than it should.
         """
-        # Labels supplied as a set
         if labelSpecifier.labels:
-            labelSet = labelSpecifier.labels
-        # Labels supplied as a range, first create a list of all the labels
-        # in the pipeline sorted according to task dependency. Then only
-        # keep labels that lie between the supplied bounds
+            # Labels supplied as a set, but that might include expression-based
+            # subsets.
+            if any(label in self.expression_subsets for label in labelSpecifier.labels):
+                need_graph = True
+            else:
+                need_graph = False
         else:
+            # Labels supplied as a range, which is an older, more limited kind
+            # of expression.
+            need_graph = True
+        if need_graph:
             # Create a copy of the pipeline to use when assessing the label
-            # ordering. Use a dict for fast searching while preserving order.
-            # Remove contracts so they do not fail in the expansion step. This
-            # is needed because a user may only configure the tasks they intend
-            # to run, which may cause some contracts to fail if they will later
-            # be dropped
+            # ordering. Remove contracts so they do not fail in the expansion
+            # step. This is needed because a user may only configure the tasks
+            # they intend to run, which may cause some contracts to fail if
+            # they will later be dropped
             pipeline = copy.deepcopy(self)
             pipeline._pipelineIR.contracts = []
             graph = pipeline.to_graph()
-
+        else:
+            graph = None
+        if labelSpecifier.labels:
+            labelSet: set[str] = set()
+            for label in labelSpecifier.labels:
+                if label in self.expression_subsets:
+                    assert graph is not None, "Guaranteed by logic above."
+                    labelSet.update(graph.select_tasks(self.expression_subsets[label]))
+                else:
+                    # Don't expand non-expression subsets here, since
+                    # PipelineIR.subset_from_labels can do it and might use
+                    # that information to decide whether to keep the subset in
+                    # the new pipeline.
+                    labelSet.add(label)
+        else:
+            assert graph is not None, "Guaranteed by logic above."
             # Verify the bounds are in the labels
             if labelSpecifier.begin is not None and labelSpecifier.begin not in graph.tasks:
                 raise ValueError(
@@ -398,7 +417,6 @@ class Pipeline:
                 raise ValueError(
                     f"End of range subset, {labelSpecifier.end}, not found in pipeline definition"
                 )
-
             labelSet = set(graph.tasks.between(labelSpecifier.begin, labelSpecifier.end))
         return Pipeline.fromIR(self._pipelineIR.subset_from_labels(labelSet, subsetCtrl))
 
@@ -414,7 +432,7 @@ class Pipeline:
                     " to separate labels, please use # instead."
                 )
             if uri.count("#") > 1:
-                raise ValueError("Only one set of labels is allowed when specifying a pipeline to load")
+                raise ValueError("Only one set of labels is allowed when specifying a pipeline to load.")
         # Everything else can be converted directly to ResourcePath.
         uri = ResourcePath(uri)
         label_subset = uri.fragment or None
@@ -427,7 +445,7 @@ class Pipeline:
             if "," in label_subset:
                 if ".." in label_subset:
                     raise ValueError(
-                        "Can only specify a list of labels or a rangewhen loading a Pipline not both"
+                        "Can only specify a list of labels or a range when loading a Pipline, not both."
                     )
                 args = {"labels": set(label_subset.split(","))}
             # labels supplied as a range
@@ -436,7 +454,7 @@ class Pipeline:
                 # than one range is specified
                 begin, end, *rest = label_subset.split("..")
                 if rest:
-                    raise ValueError("Only one range can be specified when loading a pipeline")
+                    raise ValueError("Only one range can be specified when loading a pipeline.")
                 args = {"begin": begin if begin else None, "end": end if end else None}
             # Assume anything else is a single label
             else:

@@ -123,14 +123,17 @@ class PipelineTestCase(unittest.TestCase):
         pipeline.addLabeledSubset("testSubset", "Test subset description", taskLabels)
         taskSubset = {"task0"}
         pipelineDrop = pipeline.subsetFromLabels(LabelSpecifier(taskSubset), pipeline.PipelineSubsetCtrl.DROP)
-        pipelineEdit = pipeline.subsetFromLabels(LabelSpecifier(taskSubset), pipeline.PipelineSubsetCtrl.EDIT)
+        pipeline.addLabeledSubset("testExpression", "Test expression description", ">task0")
+        pipelineEdit = pipeline.subsetFromLabels(
+            LabelSpecifier({"testExpression"}), pipeline.PipelineSubsetCtrl.EDIT
+        )
 
         # Test subsetting from labels
         self.assertNotIn(taskLabels - taskSubset, set(pipelineDrop.task_labels))
         self.assertNotIn("testSubset", pipelineDrop.subsets.keys())
-        self.assertNotIn(taskLabels - taskSubset, set(pipelineEdit.task_labels))
+        self.assertNotIn(taskLabels - {"task1"}, set(pipelineEdit.task_labels))
         self.assertIn("testSubset", pipelineEdit.subsets.keys())
-        self.assertEqual(pipelineEdit.subsets["testSubset"], taskSubset)
+        self.assertEqual(pipelineEdit.subsets["testSubset"], {"task1"})
 
     def testMergingPipelines(self):
         pipeline1 = makeSimplePipeline(2)
