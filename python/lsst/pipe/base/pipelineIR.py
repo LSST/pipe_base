@@ -508,6 +508,23 @@ class ImportIR:
     This list may include labeled subsets (but not expression-backed subsets),
     which resolves to including all of the tasks in those subsets.
     """
+    includeSubsets: list[str] | None = None
+    """A list of labeled subsets that should be imporrted.
+
+    This does not include the tasks in those subsets in the new pipeline
+    (that's what ``includeTasks`` does).  Mutually exclusive with
+    ``excludeSubsets``.  This may include expression-based labeled subsets,
+    which are by default not imported (even when
+    ``labeledSubsetModifyMode=EDIT``, because they cannot be edited).
+    """
+    excludeSubsets: list[str] | None = None
+    """A list of labeled subsets that should not be imporrted.
+
+    This does not include the tasks in those subsets in the new pipeline
+    (that's what ``excludeTasks`` does).  Mutually exclusive with
+    ``includeSubsets``.  When provided, any expression-based labeled subsets
+    not excluded will be imported.
+    """
     importContracts: bool = True
     """Boolean attribute to dictate if contracts should be inherited with the
     pipeline or not.
@@ -542,6 +559,11 @@ class ImportIR:
         if self.includeTasks and self.excludeTasks:
             raise ValueError(
                 "A task include list and a task exclude list cannot both be specified"
+                " when declaring a pipeline import."
+            )
+        if self.includeSubsets and self.excludeSubsets:
+            raise ValueError(
+                "A subset include list and a subset exclude list cannot both be specified"
                 " when declaring a pipeline import."
             )
         tmp_pipeline = PipelineIR.from_uri(os.path.expandvars(self.location))
@@ -584,7 +606,52 @@ class ImportIR:
         if not self.importSteps:
             tmp_pipeline.steps = []
 
+        subsets_to_check: set[str] = set(tmp_pipeline.labeled_subsets.keys())
+        subsets_to_drop: set[str] = set(tmp_pipeline.labeled_subsets.keys())
+        expressions_to_include: dict[str, LabeledExpressionSubset] = {}
+        if self.includeSubsets is not None:
+            # If someone explicitly includes a task, it's an error if it also
+            # gets deleted by the modify mode.
+            subsets_to_check.intersection_update(self.includeSubsets)
+            subsets_to_drop.difference_update(self.includeSubsets)
+            expressions_to_include = {
+                label: tmp_pipeline.labeled_expression_subsets[label]
+                for label in tmp_pipeline.labeled_expression_subsets.keys() & self.includeSubsets
+            }
+        elif self.excludeSubsets is not None:
+            # If someone leaves a task out of the exclude list, it's not an
+            # error if the modify mode still drops it.  This is asymmeytric
+            # with includeSubsets.
+            subsets_to_check.clear()
+            subsets_to_drop.intersection_update(self.excludeSubsets)
+            expressions_to_include = {
+                label: tmp_pipeline.labeled_expression_subsets[label]
+                for label in tmp_pipeline.labeled_expression_subsets.keys() - self.excludeSubsets
+            }
+        else:
+            # If no includeSubsets/excludeSubsets, let the modify mode do its
+            # thing inside subset_from_labels.
+            subsets_to_check.clear()
+            subsets_to_drop.clear()
+        # We can drop any subsets we know we don't want in advance of the
+        # pipeline subset operation.
+        for label in subsets_to_drop:
+            del tmp_pipeline.labeled_subsets[label]
+
         tmp_pipeline = tmp_pipeline.subset_from_labels(included_labels, self.labeledSubsetModifyMode)
+
+        missing = subsets_to_check - tmp_pipeline.labeled_subsets.keys()
+        if missing:
+            assert self.labeledSubsetModifyMode is PipelineSubsetCtrl.DROP, (
+                "We shouldn't be dropping subsets in EDIT mode."
+            )
+            raise ValueError(
+                f"Subsets with label {missing} was explicitly included in import, but would be "
+                "dropped because one of its tasks was removed.  Add "
+                "'labeledSubsetModifyMode: EDIT' to the import directive to include it, or drop it "
+                "from the include list."
+            )
+        tmp_pipeline.labeled_expression_subsets.update(expressions_to_include)
 
         if not self.importContracts:
             tmp_pipeline.contracts = []
@@ -800,6 +867,10 @@ class PipelineIR:
                     argument["includeTasks"] = argument.pop("include")
                 if "includeTasks" in argument and isinstance(argument["includeTasks"], str):
                     argument["includeTasks"] = [argument["includeTasks"]]
+                if "excludeSubsets" in argument and isinstance(argument["excludeSubsets"], str):
+                    argument["excludeSubsets"] = [argument["excludeSubsets"]]
+                if "includeSubsets" in argument and isinstance(argument["includeSubsets"], str):
+                    argument["includeSubsets"] = [argument["includeSubsets"]]
                 if "instrument" in argument and argument["instrument"] == "None":
                     argument["instrument"] = None
                 if "labeledSubsetModifyMode" in argument:
@@ -850,6 +921,7 @@ class PipelineIR:
         # integrate any imported pipelines
         accumulate_tasks: dict[str, TaskIR] = {}
         accumulate_labeled_subsets: dict[str, LabeledSubset] = {}
+        accumulate_labeled_expr_subsets: dict[str, LabeledExpressionSubset] = {}
         accumulated_parameters = ParametersIR({})
         accumulated_steps: dict[str, StepIR] = {}
 
@@ -883,6 +955,18 @@ class PipelineIR:
                     f" named Subsets. Duplicate: {overlapping_subsets | task_subset_overlap}"
                 )
             accumulate_labeled_subsets.update(tmp_IR.labeled_subsets)
+            overlapping_expr_subsets = (
+                accumulate_labeled_expr_subsets.keys() & tmp_IR.labeled_expression_subsets.keys()
+            )
+            task_expr_subset_overlap = (
+                accumulate_labeled_expr_subsets.keys() | tmp_IR.labeled_expression_subsets.keys()
+            ) & accumulate_tasks.keys()
+            if overlapping_expr_subsets or task_expr_subset_overlap:
+                raise ValueError(
+                    "Labeled expression subset names must be unique amongst imports in both labels and "
+                    f" named Subsets. Duplicate: {overlapping_expr_subsets | task_expr_subset_overlap}"
+                )
+            accumulate_labeled_expr_subsets.update(tmp_IR.labeled_expression_subsets)
             accumulated_parameters.update(tmp_IR.parameters)
             for tmp_step in tmp_IR.steps:
                 existing = accumulated_steps.setdefault(tmp_step.label, tmp_step)
@@ -896,16 +980,18 @@ class PipelineIR:
             if existing != tmp_step:
                 raise ValueError(f"There were conflicting step definitions in import {tmp_step}, {existing}")
 
-        # verify that any accumulated labeled subsets dont clash with a label
+        # verify that any accumulated labeled subsets don't clash with a label
         # from this pipeline
-        if accumulate_labeled_subsets.keys() & self.tasks.keys():
-            raise ValueError(
-                "Labeled subset names must be unique amongst imports in both labels and  named Subsets"
-            )
+        if conflict := accumulate_labeled_subsets.keys() & self.tasks.keys():
+            raise ValueError(f"Conflict betweeen imported subset and task labels: {conflict}.")
+        if conflict := accumulate_labeled_expr_subsets.keys() & self.tasks.keys():
+            raise ValueError(f"Conflict betweeen imported expression subset and task labels: {conflict}.")
         # merge in the named subsets for self so this document can override any
         # that have been delcared
         accumulate_labeled_subsets.update(self.labeled_subsets)
         self.labeled_subsets = accumulate_labeled_subsets
+        accumulate_labeled_expr_subsets.update(self.labeled_expression_subsets)
+        self.labeled_expression_subsets = accumulate_labeled_expr_subsets
 
         # merge the dict of label:TaskIR objects, preserving any configs in the
         # imported pipeline if the labels point to the same class

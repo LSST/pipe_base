@@ -322,6 +322,60 @@ class PipelineIRTestCase(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             PipelineIR.from_string(pipeline_str)
+        # Test that we can avoid this error by excluding one of those subsets.
+        pipeline_str = textwrap.dedent(
+            """
+        description: Test Pipeline
+        imports:
+            - $TESTDIR/testPipeline2.yaml
+            - location: $TESTDIR/testPipeline3.yaml
+              excludeSubsets: [modSubset]
+        """
+        )
+        pipeline = PipelineIR.from_string(pipeline_str)
+        self.assertEqual(pipeline.labeled_subsets.keys(), {"modSubset"})
+
+        # Test that we can explicitly include an expression subset.
+        pipeline_str = textwrap.dedent(
+            """
+        description: Test Pipeline
+        imports:
+            - location: $TESTDIR/testPipeline1.yaml
+              includeSubsets: [afterA]
+        """
+        )
+        pipeline = PipelineIR.from_string(pipeline_str)
+        self.assertEqual(pipeline.labeled_expression_subsets.keys(), {"afterA"})
+        self.assertEqual(pipeline.labeled_expression_subsets["afterA"].expression, ">modA")
+
+        # Test that we can include an expression subset by not explicitly
+        # excluding it.
+        pipeline_str = textwrap.dedent(
+            """
+        description: Test Pipeline
+        imports:
+            - location: $TESTDIR/testPipeline1.yaml
+              excludeSubsets: []
+        """
+        )
+        pipeline = PipelineIR.from_string(pipeline_str)
+        self.assertEqual(pipeline.labeled_expression_subsets.keys(), {"afterA"})
+        self.assertEqual(pipeline.labeled_expression_subsets["afterA"].expression, ">modA")
+
+        # Test that it's an error to explicitly include a subset while using
+        # a modify mode that drops it.
+        pipeline_str = textwrap.dedent(
+            """
+        description: Test Pipeline
+        imports:
+            - location: $TESTDIR/testPipeline2.yaml
+              excludeTasks: modA
+              includeSubsets: modSubset
+              labeledSubsetModifyMode: DROP
+        """
+        )
+        with self.assertRaisesRegex(ValueError, "Add 'labeledSubsetModifyMode: EDIT'"):
+            PipelineIR.from_string(pipeline_str)
 
         # Test that imported a named subset that duplicates a label declared
         # in this pipeline fails
@@ -377,7 +431,7 @@ class PipelineIRTestCase(unittest.TestCase):
         )
         PipelineIR.from_string(pipeline_str)
 
-        # Test that importing does work
+        # Test that importing steps does work
         pipeline_str = textwrap.dedent(
             """
         description: Test Pipeline
