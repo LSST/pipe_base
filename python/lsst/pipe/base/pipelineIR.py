@@ -494,13 +494,19 @@ class ImportIR:
     path and should be specified as a python string template, with the name of
     the environment variable inside braces.
     """
-    include: list[str] | None = None
-    """list of tasks that should be included when inheriting this pipeline.
+    includeTasks: list[str] | None = None
+    """A list of tasks that should be included when inheriting this pipeline.
     Either the include or exclude attributes may be specified, but not both.
+
+    This list may include labeled subsets (but not expression-backed subsets),
+    which resolves to including all of the tasks in those subsets.
     """
-    exclude: list[str] | None = None
-    """list of tasks that should be excluded when inheriting this pipeline.
+    excludeTasks: list[str] | None = None
+    """A list of tasks that should be excluded when inheriting this pipeline.
     Either the include or exclude attributes may be specified, but not both.
+
+    This list may include labeled subsets (but not expression-backed subsets),
+    which resolves to including all of the tasks in those subsets.
     """
     importContracts: bool = True
     """Boolean attribute to dictate if contracts should be inherited with the
@@ -533,9 +539,9 @@ class ImportIR:
         pipeline : `PipelineIR`
             A pipeline generated from the imported pipeline file.
         """
-        if self.include and self.exclude:
+        if self.includeTasks and self.excludeTasks:
             raise ValueError(
-                "An include list and an exclude list cannot both be specified"
+                "A task include list and a task exclude list cannot both be specified"
                 " when declaring a pipeline import."
             )
         tmp_pipeline = PipelineIR.from_uri(os.path.expandvars(self.location))
@@ -545,33 +551,33 @@ class ImportIR:
         included_labels = set()
         for label in tmp_pipeline.tasks:
             if (
-                (self.include and label in self.include)
-                or (self.exclude and label not in self.exclude)
-                or (self.include is None and self.exclude is None)
+                (self.includeTasks and label in self.includeTasks)
+                or (self.excludeTasks and label not in self.excludeTasks)
+                or (self.includeTasks is None and self.excludeTasks is None)
             ):
                 included_labels.add(label)
 
         # Handle labeled subsets being specified in the include or exclude
         # list, adding or removing labels.
-        if self.include is not None:
-            expressions_in_include = tmp_pipeline.labeled_expression_subsets.keys() & self.include
+        if self.includeTasks is not None:
+            expressions_in_include = tmp_pipeline.labeled_expression_subsets.keys() & self.includeTasks
             if expressions_in_include:
                 raise ValueError(
                     f"Expression-backed subset(s) {expressions_in_include} cannot be used "
-                    "in the import 'include' argument."
+                    "in the import 'include' / 'includeTasks' argument."
                 )
-            subsets_in_include = tmp_pipeline.labeled_subsets.keys() & self.include
+            subsets_in_include = tmp_pipeline.labeled_subsets.keys() & self.includeTasks
             for label in subsets_in_include:
                 included_labels.update(tmp_pipeline.labeled_subsets[label].subset)
 
-        elif self.exclude is not None:
-            expressions_in_exclude = tmp_pipeline.labeled_expression_subsets.keys() & self.exclude
+        elif self.excludeTasks is not None:
+            expressions_in_exclude = tmp_pipeline.labeled_expression_subsets.keys() & self.excludeTasks
             if expressions_in_exclude:
                 raise ValueError(
                     f"Expression-backed subset(s) {expressions_in_exclude} cannot be used "
-                    "in the import 'exclude' argument."
+                    "in the import 'exclude' / 'excludeTasks' argument."
                 )
-            subsets_in_exclude = tmp_pipeline.labeled_subsets.keys() & self.exclude
+            subsets_in_exclude = tmp_pipeline.labeled_subsets.keys() & self.excludeTasks
             for label in subsets_in_exclude:
                 included_labels.difference_update(tmp_pipeline.labeled_subsets[label].subset)
 
@@ -786,10 +792,14 @@ class PipelineIR:
             if isinstance(argument, str):
                 return {"location": argument}
             elif isinstance(argument, dict):
-                if "exclude" in argument and isinstance(argument["exclude"], str):
-                    argument["exclude"] = [argument["exclude"]]
-                if "include" in argument and isinstance(argument["include"], str):
-                    argument["include"] = [argument["include"]]
+                if "exclude" in argument:
+                    argument["excludeTasks"] = argument.pop("exclude")
+                if "excludeTasks" in argument and isinstance(argument["excludeTasks"], str):
+                    argument["excludeTasks"] = [argument["excludeTasks"]]
+                if "include" in argument:
+                    argument["includeTasks"] = argument.pop("include")
+                if "includeTasks" in argument and isinstance(argument["includeTasks"], str):
+                    argument["includeTasks"] = [argument["includeTasks"]]
                 if "instrument" in argument and argument["instrument"] == "None":
                     argument["instrument"] = None
                 if "labeledSubsetModifyMode" in argument:

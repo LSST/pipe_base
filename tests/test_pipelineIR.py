@@ -153,6 +153,17 @@ class PipelineIRTestCase(unittest.TestCase):
         # important here, since this one would break without the excluded
         # task).
         self.assertFalse(pipeline.labeled_expression_subsets.keys())
+        pipeline_str = textwrap.dedent(
+            """
+        description: Test Pipeline
+        imports:
+            - location: $TESTDIR/testPipeline1.yaml
+              excludeTasks: modA
+            - $TESTDIR/testPipeline2.yaml
+        """
+        )
+        pipeline = PipelineIR.from_string(pipeline_str)
+        self.assertEqual(set(pipeline.tasks.keys()), {"modA", "modB"})
 
         # This should pass, as the conflicting task is no in includes
         pipeline_str = textwrap.dedent(
@@ -165,18 +176,29 @@ class PipelineIRTestCase(unittest.TestCase):
             - $TESTDIR/testPipeline2.yaml
         """
         )
-
+        pipeline = PipelineIR.from_string(pipeline_str)
+        self.assertEqual(set(pipeline.tasks.keys()), {"modA", "modB"})
+        pipeline_str = textwrap.dedent(
+            """
+        description: Test Pipeline
+        imports:
+            - location: $TESTDIR/testPipeline1.yaml
+              includeTasks: modB
+              labeledSubsetModifyMode: DROP
+            - $TESTDIR/testPipeline2.yaml
+        """
+        )
         pipeline = PipelineIR.from_string(pipeline_str)
         self.assertEqual(set(pipeline.tasks.keys()), {"modA", "modB"})
 
-        # Test that you cant include and exclude a task
+        # Test that you can't include and exclude a task
         pipeline_str = textwrap.dedent(
             """
         description: Test Pipeline
         imports:
             - location: $TESTDIR/testPipeline1.yaml
               exclude: modA
-              include: modB
+              includeTasks: modB
               labeledSubsetModifyMode: EDIT
             - $TESTDIR/testPipeline2.yaml
         """
@@ -191,7 +213,7 @@ class PipelineIRTestCase(unittest.TestCase):
         description: Test Pipeline
         imports:
             - location: $TESTDIR/testPipeline1.yaml
-              exclude: modA
+              excludeTasks: modA
               include: modB
               labeledSubsetModifyMode: WRONG
             - $TESTDIR/testPipeline2.yaml
