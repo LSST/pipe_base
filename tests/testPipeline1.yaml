@@ -8,3 +8,5 @@ tasks:
 contracts:
   - modA.b == modA.c
 instrument: test.instrument
+subsets:
+  afterA: ">modA"
