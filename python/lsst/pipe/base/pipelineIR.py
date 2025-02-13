@@ -554,11 +554,23 @@ class ImportIR:
         # Handle labeled subsets being specified in the include or exclude
         # list, adding or removing labels.
         if self.include is not None:
+            expressions_in_include = tmp_pipeline.labeled_expression_subsets.keys() & self.include
+            if expressions_in_include:
+                raise ValueError(
+                    f"Expression-backed subset(s) {expressions_in_include} cannot be used "
+                    "in the import 'include' argument."
+                )
             subsets_in_include = tmp_pipeline.labeled_subsets.keys() & self.include
             for label in subsets_in_include:
                 included_labels.update(tmp_pipeline.labeled_subsets[label].subset)
 
         elif self.exclude is not None:
+            expressions_in_exclude = tmp_pipeline.labeled_expression_subsets.keys() & self.exclude
+            if expressions_in_exclude:
+                raise ValueError(
+                    f"Expression-backed subset(s) {expressions_in_exclude} cannot be used "
+                    "in the import 'exclude' argument."
+                )
             subsets_in_exclude = tmp_pipeline.labeled_subsets.keys() & self.exclude
             for label in subsets_in_exclude:
                 included_labels.difference_update(tmp_pipeline.labeled_subsets[label].subset)
